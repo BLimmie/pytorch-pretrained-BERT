@@ -964,7 +964,7 @@ class BertForQuestionAnswering(PreTrainedBertModel):
             return start_logits, end_logits
 
 
-class BertForLongClassification(PreTrainedBertModel):
+class BertForLongClassification(nn.Module):
     """BERT model for classification.
     This module is composed of the BERT model with a linear layer on top of
     the pooled output.
@@ -1009,18 +1009,19 @@ class BertForLongClassification(PreTrainedBertModel):
     logits = model(input_ids, token_type_ids, input_mask)
     ```
     """
-    def __init__(self, config, output_dim=2, num_labels, batch_size):
-        super(BertForLongClassification, self).__init__(config)
-        self.bert_window = BertForSequenceClassification(config, num_labels=output_dim)
-        self.window_output_size = num_labels
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.merge = nn.LSTM(input_size=output_dim, hidden_size=config.hidden_size, num_layers=2, bidirectional=True)
-        self.hidden_dim = config.hidden_size
+    def __init__(self, config, batch_size=32, num_labels=2, output_dim=64):
+        super(BertForLongClassification, self).__init__()
+        if config in PRETRAINED_MODEL_ARCHIVE_MAP:
+            self.bert_window = BertForSequenceClassification.from_pretrained(config, num_labels=output_dim)
+        else:
+            self.bert_window = BertForSequenceClassification(config, num_labels=output_dim)
+        self.window_output_size = output_dim
+        self.dropout = nn.Dropout(0.1)
+        self.merge = nn.LSTM(input_size=output_dim, hidden_size=768, num_layers=2, bidirectional=True)
+        self.hidden_dim = 768
         self.batch_size = batch_size
-        self.classify = nn.Linear(hidden_dim*2, num_labels)
+        self.classify = nn.Linear(self.hidden_dim*2, num_labels)
 
-        self.apply(self.init_bert_weights)
-        
         self.hidden = self.init_hidden()
 
     def init_hidden(self):
