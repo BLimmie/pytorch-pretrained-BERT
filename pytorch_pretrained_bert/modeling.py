@@ -1009,7 +1009,7 @@ class BertForLongClassification(nn.Module):
     logits = model(input_ids, token_type_ids, input_mask)
     ```
     """
-    def __init__(self, config, batch_size=32, num_labels=2, output_dim=64):
+    def __init__(self, config, num_labels=2, output_dim=64):
         super(BertForLongClassification, self).__init__()
         if config in PRETRAINED_MODEL_ARCHIVE_MAP:
             self.bert_window = BertForSequenceClassification.from_pretrained(config, num_labels=output_dim)
@@ -1019,33 +1019,33 @@ class BertForLongClassification(nn.Module):
         self.dropout = nn.Dropout(0.1)
         self.merge = nn.LSTM(input_size=output_dim, hidden_size=768, num_layers=2, bidirectional=True)
         self.hidden_dim = 768
-        self.batch_size = batch_size
         self.classify = nn.Linear(self.hidden_dim*2, num_labels)
 
         self.hidden = self.init_hidden()
 
     def init_hidden(self):
-        return (torch.zeros(2,self.batch_size,self.hidden_dim),
-                torch.zeros(2,self.batch_size,self.hidden_dim))
+        return (torch.zeros(4,1,self.hidden_dim),
+                torch.zeros(4,1,self.hidden_dim))
 
     def forward(self, input_features, labels=None):
         """
         input_features contains a list of inputfeatures s.t. each feature in the 
         list contains a list of input_ids, token_type_ids, attention_mask for each long text classification
         """
-        feature_seqs = []
-        windows = []
+        logits_list = []
         for feature in input_features:
-            for window in feature:
+            windows = []
+            self.hidden = self.init_hidden()
+            for window in feature.input_features:
                 window_output = self.bert_window(window.input_ids, window.token_type_ids, window.attention_mask)
                 window_output = window_output.view(-1, 1, self.window_output_size)
                 window_output = self.dropout(window_output)
                 windows.append(window_output)
-            feature_seqs.append(torch.cat(windows))
-        lstm_in = torch.cat(feature_seqs, dim=1).view(-1, self.batch_size, self.window_output_size)
-        lstm_out = self.merge(lstm_in, self.hidden)
-        logits = self.classify(lstm_out[-1])
-
+            lstm_in = torch.cat(windows)
+            lstm_out, _ = self.merge(lstm_in, self.hidden)
+            lstm_out = lstm_out.view(-1, 2*self.hidden_dim)
+            logits_list.append(self.classify(lstm_out))
+        logits = torch.cat(logits_list)
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(logits, labels)
