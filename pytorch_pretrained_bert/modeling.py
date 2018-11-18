@@ -962,3 +962,92 @@ class BertForQuestionAnswering(PreTrainedBertModel):
             return total_loss
         else:
             return start_logits, end_logits
+
+
+class BertForLongClassification(PreTrainedBertModel):
+    """BERT model for classification.
+    This module is composed of the BERT model with a linear layer on top of
+    the pooled output.
+
+    Params:
+        `config`: a BertConfig class instance with the configuration to build a new model.
+        `num_labels`: the number of classes for the classifier. Default = 2.
+
+    Inputs:
+        `input_ids`: a torch.LongTensor of shape [batch_size, sequence_length]
+            with the word token indices in the vocabulary(see the tokens preprocessing logic in the scripts
+            `extract_features.py`, `run_classifier.py` and `run_squad.py`)
+        `token_type_ids`: an optional torch.LongTensor of shape [batch_size, sequence_length] with the token
+            types indices selected in [0, 1]. Type 0 corresponds to a `sentence A` and type 1 corresponds to
+            a `sentence B` token (see BERT paper for more details).
+        `attention_mask`: an optional torch.LongTensor of shape [batch_size, sequence_length] with indices
+            selected in [0, 1]. It's a mask to be used if the input sequence length is smaller than the max
+            input sequence length in the current batch. It's the mask that we typically use for attention when
+            a batch has varying length sentences.
+        `labels`: labels for the classification output: torch.LongTensor of shape [batch_size]
+            with indices selected in [0, ..., num_labels].
+
+    Outputs:
+        if `labels` is not `None`:
+            Outputs the CrossEntropy classification loss of the output with the labels.
+        if `labels` is `None`:
+            Outputs the classification logits.
+
+    Example usage:
+    ```python
+    # Already been converted into WordPiece token ids
+    input_ids = torch.LongTensor([[31, 51, 99], [15, 5, 0]])
+    input_mask = torch.LongTensor([[1, 1, 1], [1, 1, 0]])
+    token_type_ids = torch.LongTensor([[0, 0, 1], [0, 2, 0]])
+
+    config = BertConfig(vocab_size=32000, hidden_size=512,
+        num_hidden_layers=8, num_attention_heads=6, intermediate_size=1024)
+
+    num_labels = 2
+
+    model = BertForSequenceClassification(config, num_labels)
+    logits = model(input_ids, token_type_ids, input_mask)
+    ```
+    """
+    def __init__(self, config, output_dim=2, num_labels, batch_size):
+        super(BertForLongClassification, self).__init__(config)
+        self.bert_window = BertForSequenceClassification(config, num_labels=output_dim)
+        self.window_output_size = num_labels
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.merge = nn.LSTM(input_size=output_dim, hidden_size=config.hidden_size, num_layers=2, bidirectional=True)
+        self.hidden_dim = config.hidden_size
+        self.batch_size = batch_size
+        self.classify = nn.Linear(hidden_dim*2, num_labels)
+
+        self.apply(self.init_bert_weights)
+        
+        self.hidden = self.init_hidden()
+
+    def init_hidden(self):
+        return (torch.zeros(2,self.batch_size,self.hidden_dim),
+                torch.zeros(2,self.batch_size,self.hidden_dim))
+
+    def forward(self, input_features, labels=None):
+        """
+        input_features contains a list of inputfeatures s.t. each feature in the 
+        list contains a list of input_ids, token_type_ids, attention_mask for each long text classification
+        """
+        feature_seqs = []
+        windows = []
+        for feature in input_features:
+            for window in feature:
+                window_output = self.bert_window(window.input_ids, window.token_type_ids, window.attention_mask)
+                window_output = window_output.view(-1, 1, self.window_output_size)
+                window_output = self.dropout(window_output)
+                windows.append(window_output)
+            feature_seqs.append(torch.cat(windows))
+        lstm_in = torch.cat(feature_seqs, dim=1).view(-1, self.batch_size, self.window_output_size)
+        lstm_out = self.merge(lstm_in, self.hidden)
+        logits = self.classify(lstm_out[-1])
+
+        if labels is not None:
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(logits, labels)
+            return loss, logits
+        else:
+            return logits
