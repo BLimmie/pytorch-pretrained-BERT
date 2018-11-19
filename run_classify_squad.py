@@ -13,7 +13,7 @@ from tqdm import tqdm, trange
 
 import numpy as np
 import torch
-from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
+from torch.utils.data import Dataset, DataLoader, RandomSampler, SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
 
 import pytorch_pretrained_bert
@@ -71,6 +71,18 @@ class LongInputFeature(object):
         self.unique_id = unique_id
         self.input_features = input_features
         self.answerable = answerable
+
+
+class FeatureDataset(Dataset):
+
+    def __init__(self, features):
+        self.features = features
+    
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, idx):
+        return self.features[idx]
 
 def read_squad_examples(input_file, is_training=True):
     """Read a SQuAD json file into a list of SquadExample."""
@@ -229,7 +241,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
             LongInputFeature(
                 unique_id,
                 input_features,
-                example.answerable))
+                int(example.answerable)))
         unique_id += 1
 
     return long_input_features
@@ -239,6 +251,7 @@ def main():
     parser.add_argument("--bert_model", default=None, type=str, required=True,
                         help="Bert pre-trained model selected in the list: bert-base-uncased, "
                              "bert-large-uncased, bert-base-cased, bert-base-multilingual, bert-base-chinese.")
+    parser.add_argument("--ckpt", default=None, type=str, help="Model ckpt file")
     parser.add_argument("--max_seq_length", default=384, type=int,
                         help="The maximum total input sequence length after WordPiece tokenization. Sequences "
                              "longer than this will be truncated, and sequences shorter than this will be padded.")
@@ -247,20 +260,122 @@ def main():
     parser.add_argument("--max_query_length", default=64, type=int,
                         help="The maximum number of tokens for the question. Questions longer than this will "
                              "be truncated to this length.")
+    parser.add_argument('--gradient_accumulation_steps',
+                        type=int,
+                        default=1,
+                        help="Number of updates steps to accumualte before performing a backward/update pass.")
+    parser.add_argument("--train_batch_size",
+                        default=32,
+                        type=int,
+                        help="Total batch size for training.")
+    parser.add_argument('--seed', 
+                        type=int, 
+                        default=42,
+                        help="random seed for initialization")
+    parser.add_argument("--learning_rate",
+                        default=5e-5,
+                        type=float,
+                        help="The initial learning rate for Adam.")
+    parser.add_argument("--warmup_proportion",
+                        default=0.1,
+                        type=float,
+                        help="Proportion of training to perform linear learning rate warmup for. "
+                             "E.g., 0.1 = 10%% of training.")
+    parser.add_argument("--num_train_epochs",
+                        default=3.0,
+                        type=float,
+                        help="Total number of training epochs to perform.")
+    parser.add_argument("--do_train",
+                        default=False,
+                        action='store_true',
+                        help="Whether to run training.")
+    parser.add_argument("--do_eval",
+                        default=False,
+                        action='store_true',
+                        help="Whether to run eval on the dev set.")
 
     args = parser.parse_args()
 
+    device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+    n_gpu = torch.cuda.device_count()
+
+    if args.gradient_accumulation_steps < 1:
+        raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
+                            args.gradient_accumulation_steps))
+
+    args.train_batch_size = int(args.train_batch_size / args.gradient_accumulation_steps)
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if n_gpu > 0:
+        torch.cuda.manual_seed_all(args.seed)
+
     tokenizer = BertTokenizer.from_pretrained(args.bert_model)
-    model = BertForLongClassification("bert-base-uncased")
-    train_examples = read_squad_examples('../train-v2.0.json')
-    train_features = convert_examples_to_features(
-            examples=train_examples[0:5],
-            tokenizer=tokenizer,
-            max_seq_length=args.max_seq_length,
-            doc_stride=args.doc_stride,
-            max_query_length=args.max_query_length,
-            is_training=True)
-    output = model(train_features)
-    logger.info("Output {}".format(output))
+    
+    num_train_steps = None
+    if args.do_train:
+        train_examples = read_squad_examples('../train-v2.0.json')
+        num_train_steps = int(
+            len(train_examples) / args.train_batch_size / args.gradient_accumulation_steps * args.num_train_epochs)
+
+    model = BertForLongClassification(args.bert_model)
+    if args.ckpt is not None:
+        model.load_state_dict(torch.load(args.ckpt))
+    model.to(device)
+    if n_gpu > 1:
+        model = torch.nn.DataParallel(model)
+
+    param_optimizer = list(model.named_parameters())
+    no_decay = ['bias', 'gamma', 'beta']
+    optimizer_grouped_parameters = [
+        {'params': [p for n, p in param_optimizer if n not in no_decay], 'weight_decay_rate': 0.01},
+        {'params': [p for n, p in param_optimizer if n in no_decay], 'weight_decay_rate': 0.0}
+        ]
+
+    optimizer = BertAdam(optimizer_grouped_parameters,
+                         lr=args.learning_rate,
+                         warmup=args.warmup_proportion,
+                         t_total=num_train_steps)    
+
+    def simple_return(data):
+        return data
+    global_step = 0
+    if args.do_train:
+        train_features = convert_examples_to_features(
+                examples=train_examples[0:5],
+                tokenizer=tokenizer,
+                max_seq_length=args.max_seq_length,
+                doc_stride=args.doc_stride,
+                max_query_length=args.max_query_length,
+                is_training=True)
+        logger.info("***** Running training *****")
+        logger.info("  Num examples = %d", len(train_examples))
+        logger.info("  Batch size = %d", args.train_batch_size)
+        logger.info("  Num steps = %d", num_train_steps)
+        train_data = FeatureDataset(train_features)
+        print(len(train_data))
+        train_sampler = RandomSampler(train_data)
+        train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size, collate_fn=simple_return)
+
+        model.train()
+        for _ in trange(int(args.num_train_epochs), desc="Epoch"):
+            tr_loss = 0
+            for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
+                label_ids = torch.tensor([feature.answerable for feature in batch])
+                loss, _ = model(batch, label_ids)
+                if n_gpu > 1:
+                    loss = loss.mean() # mean() to average on multi-gpu.
+                if args.gradient_accumulation_steps > 1:
+                    loss = loss / args.gradient_accumulation_steps
+                loss.backward()
+                tr_loss += loss.item()
+                if (step + 1) % args.gradient_accumulation_steps == 0:
+                    optimizer.step()
+                    model.zero_grad()
+                    global_step += 1
+        torch.save(model.state_dict(), "./ckpt/squad_classify.pb")
+
+
 if __name__ == "__main__":
     main()

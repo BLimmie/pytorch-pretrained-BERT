@@ -708,6 +708,7 @@ def main():
                         help="The output directory where the model checkpoints will be written.")
 
     ## Other parameters
+    parser.add_argument("--ckpt", default=None, type=str, help="Model ckpt file")
     parser.add_argument("--train_file", default=None, type=str, help="SQuAD json for training. E.g., train-v1.1.json")
     parser.add_argument("--predict_file", default=None, type=str,
                         help="SQuAD json for predictions. E.g., dev-v1.1.json or test-v1.1.json")
@@ -826,6 +827,8 @@ def main():
 
     # Prepare model
     model = BertForQuestionAnswering.from_pretrained(args.bert_model)
+    if args.ckpt is not None:
+        model.load_state_dict(torch.load(args.ckpt))
     if args.fp16:
         model.half()
     model.to(device)
@@ -915,6 +918,7 @@ def main():
                         optimizer.step()
                     model.zero_grad()
                     global_step += 1
+        torch.save(model.state_dict(), "./ckpt/squad_classify.pb")
 
     if args.do_predict:
         eval_examples = read_squad_examples(
