@@ -296,7 +296,7 @@ def main():
 
     args = parser.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     n_gpu = torch.cuda.device_count()
 
     if args.gradient_accumulation_steps < 1:
@@ -338,6 +338,8 @@ def main():
                          warmup=args.warmup_proportion,
                          t_total=num_train_steps)    
 
+    loss_fn = torch.nn.CrossEntropyLoss()
+
     def simple_return(data):
         return data
     global_step = 0
@@ -364,7 +366,8 @@ def main():
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
                 label_ids = torch.tensor([feature.answerable for feature in batch])
                 print(label_ids)
-                loss, _ = model(batch, label_ids)
+                output = model(batch)
+                loss = loss_fn(output, label_ids)
                 if n_gpu > 1:
                     loss = loss.mean() # mean() to average on multi-gpu.
                 if args.gradient_accumulation_steps > 1:
