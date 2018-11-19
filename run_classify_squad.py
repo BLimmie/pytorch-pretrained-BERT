@@ -265,7 +265,7 @@ def main():
                         default=1,
                         help="Number of updates steps to accumualte before performing a backward/update pass.")
     parser.add_argument("--train_batch_size",
-                        default=32,
+                        default=12,
                         type=int,
                         help="Total batch size for training.")
     parser.add_argument('--seed', 
@@ -315,7 +315,7 @@ def main():
     
     num_train_steps = None
     if args.do_train:
-        train_examples = read_squad_examples('../train-v2.0.json')
+        train_examples = read_squad_examples('./train-v2.0.json')
         num_train_steps = int(
             len(train_examples) / args.train_batch_size / args.gradient_accumulation_steps * args.num_train_epochs)
 
@@ -363,6 +363,7 @@ def main():
             tr_loss = 0
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
                 label_ids = torch.tensor([feature.answerable for feature in batch])
+                print(label_ids)
                 loss, _ = model(batch, label_ids)
                 if n_gpu > 1:
                     loss = loss.mean() # mean() to average on multi-gpu.

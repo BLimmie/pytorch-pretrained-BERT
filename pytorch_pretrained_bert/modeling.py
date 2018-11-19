@@ -1024,8 +1024,8 @@ class BertForLongClassification(nn.Module):
         self.hidden = self.init_hidden()
 
     def init_hidden(self):
-        return (torch.zeros(4,1,self.hidden_dim),
-                torch.zeros(4,1,self.hidden_dim))
+        return (torch.zeros(4,1,self.hidden_dim).cuda(),
+                torch.zeros(4,1,self.hidden_dim).cuda())
 
     def forward(self, input_features, labels=None):
         """
@@ -1042,6 +1042,7 @@ class BertForLongClassification(nn.Module):
                 window_output = self.dropout(window_output)
                 windows.append(window_output)
             lstm_in = torch.cat(windows)
+            self.merge.flatten_parameters()
             lstm_out, _ = self.merge(lstm_in, self.hidden)
             lstm_out = lstm_out.view(-1, 2*self.hidden_dim)
             logits_list.append(self.classify(lstm_out))
