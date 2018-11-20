@@ -138,7 +138,8 @@ def read_squad_examples(input_file, is_training=True):
                             logger.warning("Could not find answer: '%s' vs. '%s'",
                                             actual_text, cleaned_answer_text)
                             continue
-
+                else:
+                    answerable = None
                 example = SquadClassifyExample(
                     qas_id=qas_id,
                     question_text=question_text,
@@ -239,9 +240,9 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
                     attention_mask=input_mask))
         long_input_features.append(
             LongInputFeature(
-                unique_id,
+                example.qas_id,
                 input_features,
-                int(example.answerable)))
+                int(example.answerable) if example.answerable is not None else None))
         unique_id += 1
 
     return long_input_features
@@ -378,6 +379,20 @@ def main():
                     model.zero_grad()
                     global_step += 1
         torch.save(model.state_dict(), "./ckpt/squad_classify.pb")
+    if args.do_eval:
+        eval_examples = read_squad_examples("./dev-v2.0.json", False)
+        eval_features = convert_examples_to_features(examples=train_examples[0:5],
+                tokenizer=tokenizer,
+                max_seq_length=args.max_seq_length,
+                doc_stride=args.doc_stride,
+                max_query_length=args.max_query_length)
+        with open('classification.csv') as f:
+            for step, elem in enumerate(tqdm(eval_features, desc= "Evaluating")):
+                output = model(elem)
+                _, answerable = torch.max(output,1)
+                answerable = answerable[0]
+                f.write("{}, {}".format(elem.unique_id,answerable))
+
 
 
 if __name__ == "__main__":
