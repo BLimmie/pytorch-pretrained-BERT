@@ -1037,14 +1037,14 @@ class BertForLongClassification(nn.Module):
             windows = []
             self.hidden = self.init_hidden()
             for window in feature.input_features:
-                window_output = self.bert_window(window.input_ids, window.token_type_ids, window.attention_mask)
+                window_output = self.bert_window(window.input_ids.cuda(), window.token_type_ids.cuda(), window.attention_mask.cuda())
                 window_output = window_output.view(-1, 1, self.window_output_size)
                 window_output = self.dropout(window_output)
                 windows.append(window_output)
-            lstm_in = torch.cat(windows)
+            lstm_in = torch.cat(windows).view(-1, 1, self.window_output_size)
             self.merge.flatten_parameters()
             lstm_out, _ = self.merge(lstm_in, self.hidden)
-            lstm_out = lstm_out.view(-1, 2*self.hidden_dim)
+            lstm_out = lstm_out[-1].view(-1, 2*self.hidden_dim)
             logits_list.append(self.classify(lstm_out))
         logits = torch.cat(logits_list)
         if labels is not None:

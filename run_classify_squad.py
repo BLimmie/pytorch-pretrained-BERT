@@ -151,7 +151,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
                                  doc_stride, max_query_length, is_training):
     unique_id = 1000000000
     long_input_features = []
-    for (example_index, example) in enumerate(examples):
+    for (example_index, example) in enumerate(tqdm(examples, desc="Example")):
         input_features = []
         query_tokens = tokenizer.tokenize(example.question_text)
 
@@ -364,8 +364,7 @@ def main():
         for _ in trange(int(args.num_train_epochs), desc="Epoch"):
             tr_loss = 0
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
-                label_ids = torch.tensor([feature.answerable for feature in batch])
-                print(label_ids)
+                label_ids = torch.tensor([feature.answerable for feature in batch]).cuda()
                 output = model(batch)
                 loss = loss_fn(output, label_ids)
                 if n_gpu > 1:
