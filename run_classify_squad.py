@@ -381,7 +381,7 @@ def main():
         torch.save(model.state_dict(), "./ckpt/squad_classify.pb")
     if args.do_eval:
         eval_examples = read_squad_examples("./dev-v2.0.json", False)
-        eval_features = convert_examples_to_features(examples=train_examples[0:5],
+        eval_features = convert_examples_to_features(examples=eval_examples,
                 tokenizer=tokenizer,
                 max_seq_length=args.max_seq_length,
                 doc_stride=args.doc_stride,
