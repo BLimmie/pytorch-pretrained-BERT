@@ -1,6 +1,6 @@
 import json
 import csv
-with open('./dev-v2.0.json', "r") as reader:
+with open('./train-v2.0.json', "r") as reader:
         input_data = json.load(reader)["data"]
 
 gt = {}

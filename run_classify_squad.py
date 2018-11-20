@@ -380,18 +380,20 @@ def main():
                     global_step += 1
         torch.save(model.state_dict(), "./ckpt/squad_classify.pb")
     if args.do_eval:
+        model.eval()
         eval_examples = read_squad_examples("./dev-v2.0.json", False)
         eval_features = convert_examples_to_features(examples=eval_examples,
                 tokenizer=tokenizer,
                 max_seq_length=args.max_seq_length,
                 doc_stride=args.doc_stride,
-                max_query_length=args.max_query_length)
-        with open('classification.csv') as f:
+                max_query_length=args.max_query_length,
+                is_training=False)
+        with open('classification.csv', 'w') as f:
             for step, elem in enumerate(tqdm(eval_features, desc= "Evaluating")):
-                output = model(elem)
+                output = model([elem])
                 _, answerable = torch.max(output,1)
                 answerable = answerable[0]
-                f.write("{}, {}".format(elem.unique_id,answerable))
+                f.write("{}, {}\n".format(elem.unique_id,answerable))
 
 
 
