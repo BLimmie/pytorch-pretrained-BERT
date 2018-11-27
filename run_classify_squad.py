@@ -378,7 +378,7 @@ def main():
                     optimizer.step()
                     model.zero_grad()
                     global_step += 1
-        torch.save(model.state_dict(), "./ckpt/squad_classify.pb")
+        torch.save(model.state_dict(), "./ckpt/squad_classify_mean.pb")
     if args.do_eval:
         model.eval()
         eval_examples = read_squad_examples("./dev-v2.0.json", False)
@@ -388,7 +388,7 @@ def main():
                 doc_stride=args.doc_stride,
                 max_query_length=args.max_query_length,
                 is_training=False)
-        with open('classification.csv', 'w') as f:
+        with open('classification.json', 'w') as f:
             for step, elem in enumerate(tqdm(eval_features, desc= "Evaluating")):
                 output = model([elem])
                 _, answerable = torch.max(output,1)

@@ -1017,7 +1017,7 @@ class BertForLongClassification(nn.Module):
             self.bert_window = BertForSequenceClassification(config, num_labels=output_dim)
         self.window_output_size = output_dim
         self.dropout = nn.Dropout(0.1)
-        self.merge = nn.LSTM(input_size=output_dim, hidden_size=768, num_layers=2, bidirectional=True)
+        #self.merge = nn.LSTM(input_size=output_dim, hidden_size=768, num_layers=2, bidirectional=True)
         self.hidden_dim = 768
         self.classify = nn.Linear(self.hidden_dim*2, num_labels)
 
@@ -1038,14 +1038,16 @@ class BertForLongClassification(nn.Module):
             self.hidden = self.init_hidden()
             for window in feature.input_features:
                 window_output = self.bert_window(window.input_ids.cuda(), window.token_type_ids.cuda(), window.attention_mask.cuda())
-                window_output = window_output.view(-1, 1, self.window_output_size)
+                window_output = window_output.view(-1, self.window_output_size)
                 window_output = self.dropout(window_output)
                 windows.append(window_output)
-            lstm_in = torch.cat(windows).view(-1, 1, self.window_output_size)
-            self.merge.flatten_parameters()
-            lstm_out, _ = self.merge(lstm_in, self.hidden)
-            lstm_out = lstm_out[-1].view(-1, 2*self.hidden_dim)
-            logits_list.append(self.classify(lstm_out))
+            result = torch.mean(torch.cat(windows), dim=0)
+            # lstm_in = torch.cat(windows).view(-1, 1, self.window_output_size)
+            # self.merge.flatten_parameters()
+            # lstm_out, _ = self.merge(lstm_in, self.hidden)
+            # lstm_out = lstm_out[-1].view(-1, 2*self.hidden_dim)
+            # logits_list.append(self.classify(lstm_out))
+            logits_list.append(self.classify(result))
         logits = torch.cat(logits_list)
         if labels is not None:
             loss_fct = CrossEntropyLoss()
