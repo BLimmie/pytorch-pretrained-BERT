@@ -1012,9 +1012,12 @@ class BertForLongClassification(nn.Module):
     def __init__(self, config, num_labels=2, output_dim=64):
         super(BertForLongClassification, self).__init__()
         if config in PRETRAINED_MODEL_ARCHIVE_MAP:
-            self.bert_window = BertForSequenceClassification.from_pretrained(config, num_labels=output_dim)
+            self.bert_window = BertModel.from_pretrained(config)
         else:
-            self.bert_window = BertForSequenceClassification(config, num_labels=output_dim)
+            self.bert_window = BertModel(config)
+
+        self.bert_config = BertConfig.from_json_file("./bert_config.json")
+        self.bert_layer = BertLayer(bert_config)
         self.window_output_size = output_dim
         self.dropout = nn.Dropout(0.1)
         #self.merge = nn.LSTM(input_size=output_dim, hidden_size=768, num_layers=2, bidirectional=True)
@@ -1037,11 +1040,11 @@ class BertForLongClassification(nn.Module):
             windows = []
             self.hidden = self.init_hidden()
             for window in feature.input_features:
-                window_output = self.bert_window(window.input_ids.cuda(), window.token_type_ids.cuda(), window.attention_mask.cuda())
-                window_output = window_output.view(-1, self.window_output_size)
+                _, window_output = self.bert_window(window.input_ids.cuda(), window.token_type_ids.cuda(), window.attention_mask.cuda())
                 window_output = self.dropout(window_output)
                 windows.append(window_output)
-            result = torch.mean(torch.cat(windows), dim=0)
+            attention_mask = torch.zeros(1,len(feature.input_features)).unsqueeze(1).unsqueeze(2)
+            result = self.bert_layer(torch.cat(windows, dim = 1), attention_mask)[:,0]
             # lstm_in = torch.cat(windows).view(-1, 1, self.window_output_size)
             # self.merge.flatten_parameters()
             # lstm_out, _ = self.merge(lstm_in, self.hidden)
