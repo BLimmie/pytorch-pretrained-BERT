@@ -1,6 +1,6 @@
 # Final Report
 
-
+Read the final report [here](Final Report.pdf)
 
 # PyTorch Pretrained Bert
 
